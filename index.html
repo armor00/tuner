@@ -66,6 +66,11 @@ body[data-state="ok"] #nName{color:var(--ok)}
 #hint{font-family:var(--font-d);font-weight:800;font-size:26px;letter-spacing:.08em;text-transform:uppercase;color:var(--state);text-align:center;flex:1}
 #hz{font-size:16px;color:var(--mut);font-variant-numeric:tabular-nums;text-align:right;min-width:9ch}
 .target{font-size:12px;color:var(--mut);letter-spacing:.04em;text-align:center;min-height:1.4em}
+.meter{height:6px;border-radius:3px;background:var(--panel2);overflow:hidden;border:1px solid var(--line);visibility:hidden}
+.meter i{display:block;height:100%;width:0;background:var(--line2);transition:width .08s linear,background-color .15s}
+.meter.hot i{background:var(--ok)}
+.lvl{font-size:11px;color:var(--mut);text-align:center;min-height:2.8em;letter-spacing:.03em;line-height:1.4}
+.lvl.warn{color:var(--warn)}
 
 .gauge{position:relative;height:72px;margin-top:2px}
 .gauge svg{position:absolute;left:0;top:0;width:100%;height:50px;overflow:visible}
@@ -116,29 +121,6 @@ body[data-state="ok"] #nName{color:var(--ok)}
 @media (prefers-reduced-motion:reduce){
   .stat.on i{animation:none}
 }
-/* --- v2: grafica rinnovata --- */
-body::before{content:"";position:fixed;inset:0;pointer-events:none;z-index:0;opacity:0;transition:opacity .4s;
-  background:radial-gradient(120% 60% at 50% 22%,color-mix(in srgb,var(--state) 20%,transparent),transparent 70%)}
-body[data-state="ok"]::before,body[data-state="near"]::before,body[data-state="far"]::before{opacity:1}
-.app{position:relative;z-index:1}
-h1{background:linear-gradient(180deg,#fff,#b9a9ad);-webkit-background-clip:text;background-clip:text;color:transparent}
-.read{background:linear-gradient(180deg,var(--panel2),var(--panel));box-shadow:0 12px 40px rgba(0,0,0,.45),inset 0 1px 0 rgba(255,255,255,.05);transition:border-color .2s,box-shadow .3s}
-body[data-state="ok"] .read{border-color:var(--ok);box-shadow:0 0 0 1px var(--ok),0 0 36px rgba(52,210,123,.25),0 12px 40px rgba(0,0,0,.45)}
-#nName{text-shadow:0 0 40px color-mix(in srgb,var(--state) 45%,transparent)}
-.needle{width:6px;margin-left:-3px;border-radius:3px;background:linear-gradient(180deg,#fff,var(--state) 40%)}
-.zone{background:linear-gradient(180deg,rgba(52,210,123,.22),rgba(52,210,123,.04))}
-.trace{width:100%;height:56px;display:block;border-radius:6px;background:rgba(0,0,0,.28);border:1px solid var(--line)}
-.chip{padding-top:8px;background:linear-gradient(180deg,var(--panel2),var(--panel));transition:transform .1s,border-color .15s}
-.chip:active{transform:scale(.95)}
-.chip::before{content:"";position:absolute;left:14%;right:14%;top:7px;height:var(--w,2px);border-radius:2px;background:var(--line2)}
-.chip.on::before{background:var(--state)}
-.chip.done::before{background:var(--ok)}
-.mic{background:linear-gradient(180deg,#f23a55,var(--acc));box-shadow:0 8px 24px rgba(224,36,63,.35);transition:transform .1s}
-.mic:active{transform:scale(.98)}
-.mic.on{background:var(--panel2);box-shadow:none}
-.opt{display:flex;align-items:center;justify-content:space-between;gap:12px;font-size:12px;letter-spacing:.1em;text-transform:uppercase;color:var(--mut)}
-.opt[hidden]{display:none}
-#a4val{cursor:pointer}
 </style>
 </head>
 <body>
@@ -167,12 +149,13 @@ body[data-state="ok"] .read{border-color:var(--ok);box-shadow:0 0 0 1px var(--ok
       <div id="hz">&nbsp;</div>
     </div>
     <div class="target" id="target">Attiva il microfono</div>
+    <div class="meter" id="meter" aria-hidden="true"><i id="meterFill"></i></div>
+    <div class="lvl" id="lvl">&nbsp;</div>
     <div class="gauge" id="gauge">
       <div class="zone"></div>
       <svg id="ticks" viewBox="0 0 1000 50" preserveAspectRatio="none" aria-hidden="true"></svg>
       <div class="needle dim" id="needle"></div>
     </div>
-    <canvas class="trace" id="trace" aria-hidden="true"></canvas>
   </section>
 
   <section id="stringsWrap">
@@ -187,14 +170,6 @@ body[data-state="ok"] .read{border-color:var(--ok);box-shadow:0 0 0 1px var(--ok
   <div class="bottom">
     <div id="msg" role="alert" hidden></div>
     <button type="button" class="mic" id="micBtn">Attiva microfono</button>
-    <div class="opt" id="capoRow">
-      <span>Capotasto</span>
-      <div class="step">
-        <button type="button" id="capoMinus" aria-label="Capotasto più basso">&minus;</button>
-        <output id="capoVal">Libero</output>
-        <button type="button" id="capoPlus" aria-label="Capotasto più alto">+</button>
-      </div>
-    </div>
     <div class="a4">
       <span>Riferimento A4</span>
       <div class="step">
@@ -380,13 +355,6 @@ function createPitchDetector(sampleRate, fftSize) {
     return { l: m[1], a: m[2] || '', o: m[3], midi: 12 * (parseInt(m[3], 10) + 1) + SEMI[m[1]] + acc };
   }
   function glyph(a) { return a === '#' ? '♯' : (a === 'b' ? '♭' : ''); }
-  function capoShift(p) {
-    if (!S.capo) return;
-    p.midi += S.capo;
-    var nn = SHARPS[((p.midi % 12) + 12) % 12];
-    p.l = nn.charAt(0); p.a = nn.length > 1 ? '#' : ''; p.o = String(Math.floor(p.midi / 12) - 1);
-    p.freq = midiToFreq(p.midi, S.a4);
-  }
   function midiToFreq(m, a4) { return a4 * Math.pow(2, (m - 69) / 12); }
   function median(a) {
     var s = a.slice().sort(function (x, y) { return x - y; });
@@ -401,32 +369,32 @@ function createPitchDetector(sampleRate, fftSize) {
 
   /* ---------- Stato ---------- */
   var $ = function (id) { return document.getElementById(id); };
-  var S = { a4: 440, capo: 0, mode: '6', ids: { 6: 'std6', 7: 'std7', 8: 'std8' }, locked: -1 };
+  var S = { a4: 440, mode: '6', ids: { 6: 'std6', 7: 'std7', 8: 'std8' }, locked: -1 };
   try {
     var saved = JSON.parse(localStorage.getItem('accordatore.v1') || 'null');
     if (saved) {
       if (typeof saved.a4 === 'number' && saved.a4 >= 400 && saved.a4 <= 480) S.a4 = saved.a4;
-      if (typeof saved.capo === 'number' && saved.capo >= 0 && saved.capo <= 9) S.capo = saved.capo | 0;
       if (['6', '7', '8', 'chrom'].indexOf(saved.mode) >= 0) S.mode = saved.mode;
       if (saved.ids) for (var k in saved.ids) if (S.ids[k] !== undefined) S.ids[k] = findTuning(k, saved.ids[k])[0];
     }
   } catch (e) {}
-  function save() { try { localStorage.setItem('accordatore.v1', JSON.stringify({ a4: S.a4, capo: S.capo, mode: S.mode, ids: S.ids })); } catch (e) {} }
+  function save() { try { localStorage.setItem('accordatore.v1', JSON.stringify({ a4: S.a4, mode: S.mode, ids: S.ids })); } catch (e) {} }
 
   var targets = [];       // [{l,a,o,midi,freq}]
   var tuned = [];         // corde gia intonate
   var cur = null;         // ultima lettura valida
   var hist = [];          // storico log2(freq)
-  var trace = [], needle = 0, lastFrame = 0, lastDetect = 0, inTune = false, inSince = 0;
+  var needle = 0, lastFrame = 0, lastDetect = 0, inTune = false, inSince = 0;
 
   var running = false, ctx = null, stream = null, srcNode = null, analyser = null, det = null, buf = null, raf = 0, wake = null;
   var toneUntil = 0, toneNodes = null;
+  var meterDb = -100, nf = 0.001, lastSig = 0, startTime = 0;
 
   var els = {
     seg: $('seg'), sel: $('tuning'), selWrap: $('selWrap'), chips: $('chips'), rowhead: $('rowhead'), tip: $('tip'),
     lockBtn: $('lockBtn'), note: $('note'), nName: $('nName'), nAcc: $('nAcc'), nOct: $('nOct'), cents: $('cents'), hint: $('hint'),
     hz: $('hz'), target: $('target'), needle: $('needle'), mic: $('micBtn'), stat: $('stat'), statTxt: $('statTxt'),
-    a4val: $('a4val'), capoRow: $('capoRow'), capoVal: $('capoVal'), trace: $('trace'), msg: $('msg'), ticks: $('ticks')
+    a4val: $('a4val'), msg: $('msg'), ticks: $('ticks'), meter: $('meter'), meterFill: $('meterFill'), lvl: $('lvl')
   };
   var cache = {};
   function setText(key, el, txt) { if (cache[key] !== txt) { cache[key] = txt; el.textContent = txt; } }
@@ -479,7 +447,7 @@ function createPitchDetector(sampleRate, fftSize) {
       findTuning(S.mode, S.ids[S.mode])[2].split(' ').forEach(function (t) {
         var p = parseNote(t);
         p.freq = midiToFreq(p.midi, S.a4);
-        capoShift(p); targets.push(p);
+        targets.push(p);
       });
     }
     tuned = targets.map(function () { return false; });
@@ -501,7 +469,6 @@ function createPitchDetector(sampleRate, fftSize) {
     targets.forEach(function (t, i) {
       var b = document.createElement('button');
       b.type = 'button'; b.className = 'chip'; b.dataset.i = i;
-      b.style.setProperty('--w', (1 + 2.6 * (n - 1 - i) / Math.max(1, n - 1)).toFixed(1) + 'px');
       b.setAttribute('aria-label', 'Corda ' + (n - i) + ', ' + t.l + glyph(t.a) + t.o);
       var sn = document.createElement('span'); sn.className = 'sn'; sn.textContent = n - i;
       var cn = document.createElement('span'); cn.className = 'cn'; cn.textContent = t.l;
@@ -514,9 +481,6 @@ function createPitchDetector(sampleRate, fftSize) {
 
   function refreshStatic() {
     els.a4val.textContent = S.a4 + ' Hz';
-    els.capoVal.textContent = S.capo ? 'Tasto ' + S.capo : 'Libero';
-    els.capoRow.hidden = S.mode === 'chrom';
-    trace.length = 0;
     els.seg.querySelectorAll('button').forEach(function (b) { b.setAttribute('aria-pressed', String(b.dataset.m === S.mode)); });
     targets.forEach(function (t) { t.freq = midiToFreq(t.midi, S.a4); });
   }
@@ -528,14 +492,6 @@ function createPitchDetector(sampleRate, fftSize) {
   els.sel.addEventListener('change', function () { S.ids[S.mode] = els.sel.value; save(); applyTuning(); });
   $('a4minus').addEventListener('click', function () { setA4(S.a4 - 1); });
   $('a4plus').addEventListener('click', function () { setA4(S.a4 + 1); });
-  els.a4val.addEventListener('click', function () { setA4(440); });
-  function setCapo(v) { S.capo = Math.max(0, Math.min(9, v)); save(); applyTuning(); }
-  $('capoMinus').addEventListener('click', function () { setCapo(S.capo - 1); });
-  $('capoPlus').addEventListener('click', function () { setCapo(S.capo + 1); });
-  document.addEventListener('keydown', function (e) {
-    var t = e.target && e.target.tagName;
-    if (e.code === 'Space' && t !== 'BUTTON' && t !== 'SELECT') { e.preventDefault(); running ? stopMic() : startMic(); }
-  });
   function setA4(v) {
     S.a4 = Math.max(400, Math.min(480, v)); save(); hist = []; cur = null;
     refreshStatic();
@@ -590,7 +546,11 @@ function createPitchDetector(sampleRate, fftSize) {
       return;
     }
     getCtx();
-    navigator.mediaDevices.getUserMedia({ audio: { echoCancellation: false, noiseSuppression: false, autoGainControl: false, channelCount: 1 } })
+    navigator.mediaDevices.getUserMedia({ audio: { echoCancellation: false, noiseSuppression: false, autoGainControl: false } })
+      .catch(function (err) {
+        if (err && (err.name === 'OverconstrainedError' || err.name === 'TypeError')) return navigator.mediaDevices.getUserMedia({ audio: true });
+        throw err;
+      })
       .then(function (s) {
         stream = s;
         var c = getCtx();
@@ -603,6 +563,7 @@ function createPitchDetector(sampleRate, fftSize) {
         det = createPitchDetector(c.sampleRate, analyser.fftSize);
         buf = new Float32Array(analyser.fftSize);
         running = true; hist = []; cur = null;
+        startTime = performance.now(); lastSig = startTime; meterDb = -100; nf = 0.001;
         requestWake();
         setRunningUI(true);
         lastFrame = performance.now();
@@ -622,7 +583,7 @@ function createPitchDetector(sampleRate, fftSize) {
     if (srcNode) { try { srcNode.disconnect(); } catch (e) {} }
     stream = null; srcNode = null; analyser = null; det = null;
     releaseWake();
-    setRunningUI(false); trace.length = 0; setTimeout(function () { drawTrace(performance.now()); }, 0);
+    setRunningUI(false);
     cur = null; hist = [];
     render(performance.now(), 16);
   }
@@ -661,7 +622,13 @@ function createPitchDetector(sampleRate, fftSize) {
       fmin = lo / 1.5; fmax = hi * 1.5;
     }
     var r = det.detect(buf, fmin, fmax);
-    if (!r.freq || r.rms < 0.0035 || r.clarity < 0.78) return;
+    // livello in ingresso e rumore di fondo (la soglia si adatta al microfono)
+    var db = r.rms > 1e-7 ? 20 * Math.log10(r.rms) : -100;
+    meterDb = db > meterDb ? db : meterDb + (db - meterDb) * 0.25;
+    if (r.rms > 1e-5) lastSig = now;
+    nf = r.rms < nf ? nf + (r.rms - nf) * 0.25 : nf + (r.rms - nf) * 0.003;
+    var gate = Math.max(0.0005, nf * 2.2);
+    if (!r.freq || r.rms < gate || r.clarity < 0.72) return;
 
     var lf = Math.log2(r.freq);
     if (hist.length && Math.abs(1200 * (lf - median(hist))) > 100) hist.length = 0;
@@ -709,7 +676,7 @@ function createPitchDetector(sampleRate, fftSize) {
     var tgt = 0;
     if (live) {
       var ac = Math.abs(cur.disp);
-      if (inTune) { if (ac > 5) inTune = false; } else if (ac <= 3) { inTune = true; try { if (navigator.vibrate) navigator.vibrate(25); } catch (e) {} }
+      if (inTune) { if (ac > 5) inTune = false; } else if (ac <= 3) inTune = true;
       state = inTune ? 'ok' : (ac <= 10 ? 'near' : 'far');
       tgt = Math.max(-50, Math.min(50, cur.disp));
     } else { inTune = false; }
@@ -735,8 +702,23 @@ function createPitchDetector(sampleRate, fftSize) {
       setText('nName', els.nName, '—'); setText('nAcc', els.nAcc, ''); setText('nOct', els.nOct, '');
       setText('cents', els.cents, ' '); setText('hz', els.hz, ' '); setText('hint', els.hint, ' ');
       var idle = !running ? 'Attiva il microfono' : (S.locked >= 0 ? 'Suona la corda ' + (targets.length - S.locked) + ' · ' + targets[S.locked].l + glyph(targets[S.locked].a) + targets[S.locked].o : 'Suona una corda');
-      if (running && S.mode !== 'chrom' && targets.length && tuned.every(Boolean)) idle = 'Tutte le corde intonate ✓';
       setText('target', els.target, idle);
+    }
+
+    if (running) {
+      els.meter.style.visibility = 'visible';
+      els.meterFill.style.width = (Math.max(0, Math.min(1, (meterDb + 70) / 60)) * 100).toFixed(0) + '%';
+      setCls('mh', els.meter, 'hot', fresh);
+      var since = now - startTime, ltxt, lwarn = false;
+      if (since > 2500 && now - lastSig > 2500) {
+        ltxt = 'Nessun segnale dal microfono. Controlla il permesso del browser e che nessun’altra app lo stia usando.'; lwarn = true;
+      } else if (since > 5000 && !live && (!cur || now - cur.t > 5000) && meterDb < -48) {
+        ltxt = 'Segnale debole: avvicina il telefono alla chitarra o suona più forte.'; lwarn = true;
+      } else ltxt = 'Ingresso ' + Math.round(meterDb) + ' dB';
+      setText('lvl', els.lvl, ltxt); setCls('lvlw', els.lvl, 'warn', lwarn);
+    } else {
+      els.meter.style.visibility = 'hidden';
+      setText('lvl', els.lvl, ' '); setCls('lvlw', els.lvl, 'warn', false);
     }
 
     if (S.mode !== 'chrom') {
@@ -753,35 +735,12 @@ function createPitchDetector(sampleRate, fftSize) {
     }
   }
 
-  var TC = { ok: '#34d27b', near: '#f2a93b', far: '#e0243f' };
-  function drawTrace(now) {
-    var cv = els.trace, dpr = window.devicePixelRatio || 1, w = cv.clientWidth, h = cv.clientHeight;
-    if (!w) return;
-    if (cv.width !== Math.round(w * dpr)) { cv.width = Math.round(w * dpr); cv.height = Math.round(h * dpr); }
-    var g = cv.getContext('2d'); g.setTransform(dpr, 0, 0, dpr, 0, 0); g.clearRect(0, 0, w, h);
-    var mid = h / 2, k = (mid - 5) / 50, W = 5000;
-    g.fillStyle = 'rgba(52,210,123,.1)'; g.fillRect(0, mid - 3 * k, w, 6 * k);
-    g.strokeStyle = 'rgba(255,255,255,.12)'; g.lineWidth = 1; g.beginPath(); g.moveTo(0, mid); g.lineTo(w, mid); g.stroke();
-    var last = trace[trace.length - 1];
-    if (cur && now - cur.t < 300) { if (!last || now - last[0] > 30) trace.push([now, cur.disp, document.body.dataset.state]); }
-    else if (last && last[1] !== null) trace.push([now, null, '']);
-    while (trace.length && now - trace[0][0] > W) trace.shift();
-    g.lineWidth = 2.5; g.lineCap = 'round';
-    for (var i = 1; i < trace.length; i++) {
-      var a = trace[i - 1], b = trace[i];
-      if (a[1] === null || b[1] === null) continue;
-      g.strokeStyle = TC[b[2]] || '#938689'; g.beginPath();
-      g.moveTo((a[0] - (now - W)) / W * w, mid - Math.max(-50, Math.min(50, a[1])) * k);
-      g.lineTo((b[0] - (now - W)) / W * w, mid - Math.max(-50, Math.min(50, b[1])) * k);
-      g.stroke();
-    }
-  }
   function loop(now) {
     if (!running) return;
     raf = requestAnimationFrame(loop);
     var dt = Math.min(100, now - lastFrame); lastFrame = now;
     if (now - lastDetect >= 40) { lastDetect = now; analyse(now); }
-    render(now, dt); drawTrace(now);
+    render(now, dt);
   }
 
   /* ---------- Avvio ---------- */
@@ -789,7 +748,6 @@ function createPitchDetector(sampleRate, fftSize) {
   applyTuning();
   render(performance.now(), 16);
 
-  drawTrace(performance.now());
   window.__tuner = { S: S, getTargets: function () { return targets; }, getCur: function () { return cur; } };
 })();
 </script>
